@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 #if SWIFT_PACKAGE
 import MonitorCore
@@ -25,6 +26,7 @@ struct MonitorView: View {
     @ObservedObject var presentation: WindowPresentation
     @State private var errorMessage: String?
     @State private var isStarting = false
+    @State private var selectedRecordIDs = Set<RequestRecord.ID>()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,6 +41,17 @@ struct MonitorView: View {
                     numberField("告警阈值", unit: "毫秒", text: $model.thresholdText)
                     numberField("时间间隔", unit: "秒", text: $model.intervalText)
                     Spacer()
+                    Button {
+                        model.resetSettings()
+                        presentation.focusToken = UUID()
+                    } label: {
+                        Label("重置", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(model.isRunning || isStarting)
+                    .help("恢复默认链接、告警阈值和时间间隔")
+                    .accessibilityIdentifier("resetSettings")
                     Button(action: toggle) {
                         Label(isStarting ? "准备中…" : model.isRunning ? "停止监控" : "开启监控", systemImage: model.isRunning ? "stop.fill" : "play.fill")
                             .frame(width: 112)
@@ -50,7 +63,7 @@ struct MonitorView: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .accessibilityIdentifier("toggleMonitoring")
                 }
-                Text("请求完成后记录总耗时，超过阈值时通知。")
+                Text("使用 HEAD 请求测量响应延迟，超过阈值时通知。")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Image(systemName: notifications.needsSettings ? "bell.slash" : "bell")
@@ -140,15 +153,15 @@ struct MonitorView: View {
     }
 
     private var historyTable: some View {
-        Table(model.records) {
+        Table(model.records, selection: $selectedRecordIDs) {
             TableColumn("请求开始时间") { record in
                 Text(record.startedAt, format: .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
                     .monospacedDigit().help(record.startedAt.formatted(date: .complete, time: .complete))
             }.width(min: 140, ideal: 150, max: 170)
             TableColumn("链接") { record in
-                Text(record.url).lineLimit(1).truncationMode(.middle).help(record.url).textSelection(.enabled)
+                Text(record.url).lineLimit(1).truncationMode(.middle).help(record.url)
             }.width(min: 170, ideal: 280)
-            TableColumn("总耗时") { record in
+            TableColumn("响应耗时") { record in
                 Text("\(record.elapsedMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms")
                     .monospacedDigit()
             }.width(82)
@@ -162,6 +175,39 @@ struct MonitorView: View {
             }.width(138)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .contextMenu(forSelectionType: RequestRecord.ID.self) { ids in
+            if !ids.isEmpty {
+                Button(ids.count == 1 ? "复制行" : "复制所选 \(ids.count) 行") {
+                    let text = copyText(for: ids)
+                    guard !text.isEmpty else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+            }
+        }
+        .onCopyCommand(perform: selectedRecordIDs.isEmpty ? nil : {
+            [NSItemProvider(object: copyText(for: selectedRecordIDs) as NSString)]
+        })
+        .onChange(of: model.records.map(\.id)) { visibleIDs in
+            selectedRecordIDs.formIntersection(visibleIDs)
+        }
+    }
+
+    private func copyText(for ids: Set<RequestRecord.ID>) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = .current
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        // 按表格顺序复制完整字段；制表符分列，换行分隔多条记录。
+        return model.records.filter { ids.contains($0.id) }.map { record in
+            [
+                dateFormatter.string(from: record.startedAt),
+                record.url,
+                "\(record.elapsedMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms",
+                record.outcome.label,
+                record.notification.label
+            ].joined(separator: "\t")
+        }.joined(separator: "\n")
     }
 
     private var footer: some View {

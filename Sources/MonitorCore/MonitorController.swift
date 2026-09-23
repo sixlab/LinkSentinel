@@ -48,6 +48,16 @@ public final class MonitorController: ObservableObject {
         reloadHistory()
     }
 
+    public func resetSettings() {
+        guard !isRunning, !isShuttingDown else { return }
+        let settings = MonitorSettings.defaults
+        urlText = settings.url.absoluteString
+        thresholdText = String(settings.thresholdMilliseconds)
+        intervalText = String(Int(settings.intervalSeconds))
+        defaults.removeObject(forKey: "monitor.settings")
+        latestDetail = "已恢复默认设置，点击开启开始监控。"
+    }
+
     public func start() throws {
         guard !isShuttingDown else { throw ValidationError.message("应用正在退出，请稍候。") }
         guard !isRunning else { return }
