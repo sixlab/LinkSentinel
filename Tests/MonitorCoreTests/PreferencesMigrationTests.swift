@@ -47,4 +47,43 @@ final class PreferencesMigrationTests: XCTestCase {
             XCTAssertTrue(current.bool(forKey: "preferences.legacyMigrationCompleted"))
         }
     }
+
+    func testOldDefaultURLUpgradesEvenAfterLegacyMigrationCompleted() throws {
+        for url in ["https://www.google.com", "https://www.google.com/"] {
+            try withDefaults { old, current in
+                let saved = MonitorSettings(url: URL(string: url)!, thresholdMilliseconds: 100, intervalSeconds: 7)
+                current.set(try JSONEncoder().encode(saved), forKey: "monitor.settings")
+                current.set(true, forKey: "preferences.legacyMigrationCompleted")
+                PreferencesMigration.migrate(from: old, to: current)
+                let restored = try JSONDecoder().decode(MonitorSettings.self, from: XCTUnwrap(current.data(forKey: "monitor.settings")))
+                XCTAssertEqual(restored.url.absoluteString, "https://www.gstatic.com/generate_204")
+                XCTAssertEqual(restored.thresholdMilliseconds, 100)
+                XCTAssertEqual(restored.intervalSeconds, 7)
+            }
+        }
+    }
+
+    func testDefaultURLUpgradePreservesCustomGoogleURL() throws {
+        try withDefaults { old, current in
+            let saved = MonitorSettings(url: URL(string: "https://www.google.com/search?q=monitor")!, thresholdMilliseconds: 500, intervalSeconds: 8)
+            current.set(try JSONEncoder().encode(saved), forKey: "monitor.settings")
+            PreferencesMigration.migrate(from: old, to: current)
+            let restored = try JSONDecoder().decode(MonitorSettings.self, from: XCTUnwrap(current.data(forKey: "monitor.settings")))
+            XCTAssertEqual(restored, saved)
+        }
+    }
+
+    func testDefaultURLUpgradeDoesNotOverrideLaterUserChoice() throws {
+        try withDefaults { old, current in
+            let saved = MonitorSettings(url: URL(string: "https://www.google.com")!, thresholdMilliseconds: 600, intervalSeconds: 9)
+            current.set(try JSONEncoder().encode(saved), forKey: "monitor.settings")
+            PreferencesMigration.migrate(from: old, to: current)
+            let upgraded = try JSONDecoder().decode(MonitorSettings.self, from: XCTUnwrap(current.data(forKey: "monitor.settings")))
+            XCTAssertEqual(upgraded.url.absoluteString, "https://www.gstatic.com/generate_204")
+            current.set(try JSONEncoder().encode(saved), forKey: "monitor.settings")
+            PreferencesMigration.migrate(from: old, to: current)
+            let restored = try JSONDecoder().decode(MonitorSettings.self, from: XCTUnwrap(current.data(forKey: "monitor.settings")))
+            XCTAssertEqual(restored, saved)
+        }
+    }
 }

@@ -22,7 +22,7 @@ public struct NetworkProbe: Probing, @unchecked Sendable {
 }
 
 // A single serial queue owns the session, result and continuation.
-// Response bytes are discarded as they arrive, so large endpoints cannot fill memory.
+// A HEAD probe finishes as soon as response headers arrive, without reading a body.
 private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let queue = DispatchQueue(label: "LinkSentinel.probe")
     private let settings: MonitorSettings
@@ -55,7 +55,7 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
             delegateQueue.underlyingQueue = queue
             session = URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
             var request = URLRequest(url: settings.url)
-            request.httpMethod = "GET"
+            request.httpMethod = "HEAD"
             request.setValue("LinkSentinel/1.0", forHTTPHeaderField: "User-Agent")
             session?.dataTask(with: request).resume()
         }
@@ -79,8 +79,19 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard !finished else { completionHandler(.cancel); return }
         responseCode = (response as? HTTPURLResponse)?.statusCode
-        completionHandler(finished ? .cancel : .allow)
+        // HEAD 在收到响应头时已经完成；不读取服务器可能误发的正文。
+        completionHandler(.cancel)
+        finishResponse()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        // 与 Mihomo 普通 URLTest 一致，记录当前地址的响应，不继续请求跳转目标。
+        completionHandler(nil)
+        guard !finished else { return }
+        responseCode = response.statusCode
+        finishResponse()
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
@@ -89,19 +100,27 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard !finished else { return }
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
         if cancelled {
             finish(.cancelled, "监控已停止")
         } else if let error {
             finish(.failure, error.localizedDescription)
+        } else {
+            finish(.failure, "服务器没有返回有效的 HTTP 响应")
+        }
+    }
+
+    private func finishResponse() {
+        if cancelled {
+            finish(.cancelled, "监控已停止")
         } else if let responseCode, (200..<400).contains(responseCode) {
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
             if elapsed > Double(settings.thresholdMilliseconds) {
-                finish(.timeout, "HTTP \(responseCode) · 请求已完成，超过 \(settings.thresholdMilliseconds) 毫秒阈值")
+                finish(.timeout, "HEAD · HTTP \(responseCode) · 延迟高，超过 \(settings.thresholdMilliseconds) 毫秒阈值")
             } else {
-                finish(.success, "HTTP \(responseCode)")
+                finish(.success, "HEAD · HTTP \(responseCode)")
             }
         } else {
-            finish(.failure, responseCode.map { "HTTP \($0)" } ?? "服务器没有返回有效的 HTTP 响应")
+            finish(.failure, responseCode.map { "HEAD · HTTP \($0)" } ?? "服务器没有返回有效的 HTTP 响应")
         }
     }
 }

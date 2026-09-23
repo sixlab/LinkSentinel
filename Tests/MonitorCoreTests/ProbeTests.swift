@@ -9,10 +9,10 @@ final class ProbeTests: XCTestCase {
         return await NetworkProbe(configuration: configuration).run(settings)
     }
 
-    func testSuccessfulRequestDoesNotAlert() async {
-        let result = await run("ok")
+    func testHEADRequestAccepts204WithoutAnAlert() async {
+        let result = await run("head-only")
         XCTAssertEqual(result.outcome, .success)
-        XCTAssertEqual(result.statusCode, 200)
+        XCTAssertEqual(result.statusCode, 204)
         XCTAssertFalse(result.shouldNotify)
     }
 
@@ -27,6 +27,13 @@ final class ProbeTests: XCTestCase {
         let result = await run("offline")
         XCTAssertEqual(result.outcome, .failure)
         XCTAssertTrue(result.shouldNotify)
+    }
+
+    func testRedirectIsMeasuredWithoutFollowingItsDestination() async {
+        let result = await run("redirect")
+        XCTAssertEqual(result.statusCode, 302)
+        XCTAssertEqual(result.outcome, .success)
+        XCTAssertFalse(result.shouldNotify)
     }
 
     func testSlowRequestFinishesAndRecordsTotalDuration() async {
@@ -61,19 +68,18 @@ final class ProbeTests: XCTestCase {
         XCTAssertFalse(result.shouldNotify)
     }
 
-    func testStreamingResponseWaitsForEntireBody() async {
-        let result = await run("stream", threshold: 80)
-        XCTAssertEqual(result.outcome, .timeout)
+    func testHEADResponseFinishesAtHeadersWithoutWaitingForBody() async {
+        let result = await run("headers-before-body", threshold: 400)
+        XCTAssertEqual(result.outcome, .success)
         XCTAssertEqual(result.statusCode, 200)
-        XCTAssertGreaterThanOrEqual(result.elapsedMilliseconds, 550)
-        XCTAssertTrue(result.shouldNotify)
+        XCTAssertLessThan(result.elapsedMilliseconds, 400)
+        XCTAssertFalse(result.shouldNotify)
     }
 }
 
 // Only the external HTTP transport is replaced; classification, timing and cancellation are real.
 final class FixtureURLProtocol: URLProtocol {
     private let queue = DispatchQueue(label: "LinkSentinel.Tests.transport")
-    private var streamTimer: DispatchSourceTimer?
     private var pendingResponse: DispatchWorkItem?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -82,6 +88,14 @@ final class FixtureURLProtocol: URLProtocol {
     }
     private func respond() {
         switch request.url!.path {
+        case "/redirect":
+            let destination = URL(string: "https://fixture.test/redirected-error")!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": destination.absoluteString])!
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: destination), redirectResponse: response)
+        case "/redirected-error":
+            complete(status: 503)
+        case "/head-only", "/generate_204":
+            complete(status: request.httpMethod == "HEAD" ? 204 : 405)
         case "/slow": return
         case "/delayed-success", "/delayed-http-error", "/delayed-offline":
             let work = DispatchWorkItem { [weak self] in
@@ -96,25 +110,17 @@ final class FixtureURLProtocol: URLProtocol {
             queue.asyncAfter(deadline: .now() + .milliseconds(300), execute: work)
         case "/offline":
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
-        case "/stream":
-            // 明确类型，避免 MIME 嗅探缓冲首包；正文在 600 毫秒后完整结束。
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/octet-stream"])!
+        case "/headers-before-body":
+            // 模拟服务器先返回响应头、迟迟不结束传输；HEAD 计时不应等待正文。
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/octet-stream", "Content-Length": "1024"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(deadline: .now() + .milliseconds(30), repeating: .milliseconds(30))
-            var chunks = 0
-            timer.setEventHandler { [weak self] in
+            let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
-                self.client?.urlProtocol(self, didLoad: Data("still sending".utf8))
-                chunks += 1
-                if chunks == 20 {
-                    self.streamTimer?.cancel()
-                    self.streamTimer = nil
-                    self.client?.urlProtocolDidFinishLoading(self)
-                }
+                self.client?.urlProtocol(self, didLoad: Data(repeating: 0, count: 1024))
+                self.client?.urlProtocolDidFinishLoading(self)
             }
-            streamTimer = timer
-            timer.resume()
+            pendingResponse = work
+            queue.asyncAfter(deadline: .now() + .milliseconds(700), execute: work)
         default:
             complete(status: request.url!.path == "/http-error" ? 503 : 200)
         }
@@ -122,15 +128,15 @@ final class FixtureURLProtocol: URLProtocol {
     private func complete(status: Int) {
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("fixture".utf8))
+        if request.httpMethod != "HEAD" && status != 204 {
+            client?.urlProtocol(self, didLoad: Data("fixture".utf8))
+        }
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {
         queue.async { [self] in
             pendingResponse?.cancel()
             pendingResponse = nil
-            streamTimer?.cancel()
-            streamTimer = nil
         }
     }
 }

@@ -29,6 +29,22 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(model.state, .stopped)
     }
 
+    func testFreshSettingsMonitorThe204EndpointWithHEAD() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FixtureURLProtocol.self]
+        let (model, directory, suite) = try makeController(probe: NetworkProbe(configuration: configuration))
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        try model.start()
+        try await waitUntil { model.totalRecords == 1 }
+        XCTAssertEqual(model.records.first?.url, "https://www.gstatic.com/generate_204")
+        XCTAssertEqual(model.records.first?.statusCode, 204)
+        XCTAssertEqual(model.records.first?.outcome, .success)
+    }
+
     func testSlowRequestPersistsTotalDurationOnlyAfterCompletion() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FixtureURLProtocol.self]

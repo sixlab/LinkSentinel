@@ -52,9 +52,9 @@ final class NotificationService: NSObject, ObservableObject, AlertSending, UNUse
             return .denied
         }
         let content = UNMutableNotificationContent()
-        content.title = record.outcome == .timeout ? "链接请求超时" : "链接请求失败"
+        content.title = record.outcome == .timeout ? "链接延迟高" : "链接请求失败"
         content.subtitle = URL(string: record.url)?.host ?? "链接哨兵"
-        content.body = "\(record.url)\n总耗时 \(Int(record.elapsedMilliseconds.rounded())) 毫秒 · \(record.detail)"
+        content.body = "\(record.url)\n响应耗时 \(Int(record.elapsedMilliseconds.rounded())) 毫秒 · \(record.detail)"
         content.sound = .default
         let request = UNNotificationRequest(identifier: record.id.uuidString, content: content, trigger: nil)
         do {

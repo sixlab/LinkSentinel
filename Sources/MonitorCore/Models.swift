@@ -11,7 +11,7 @@ public struct MonitorSettings: Codable, Equatable, Sendable {
         self.intervalSeconds = intervalSeconds
     }
 
-    public static let defaults = MonitorSettings(url: URL(string: "https://www.google.com")!, thresholdMilliseconds: 1000, intervalSeconds: 5)
+    public static let defaults = MonitorSettings(url: URL(string: "https://www.gstatic.com/generate_204")!, thresholdMilliseconds: 1000, intervalSeconds: 5)
 
     public static func validated(url rawURL: String, threshold: String, interval: String) throws -> Self {
         let text = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,16 +43,17 @@ public enum ValidationError: LocalizedError {
 public enum MonitorState: String, Sendable {
     case stopped = "未开启"
     case monitoring = "监控中"
-    case timeout = "超时"
+    case timeout = "延迟高"
     case failure = "失败"
 }
 
 public enum ProbeOutcome: String, Codable, Sendable {
+    // 保留 timeout 的存储值，以兼容已经保存的请求历史。
     case success, timeout, failure, cancelled
     public var label: String {
         switch self {
         case .success: return "正常"
-        case .timeout: return "超时"
+        case .timeout: return "延迟高"
         case .failure: return "请求失败"
         case .cancelled: return "已取消"
         }

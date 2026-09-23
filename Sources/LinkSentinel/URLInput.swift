@@ -9,7 +9,7 @@ struct URLInput: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
-        field.placeholderString = "https://www.google.com"
+        field.placeholderString = "https://www.gstatic.com/generate_204"
         field.font = .systemFont(ofSize: 14)
         field.bezelStyle = .roundedBezel
         field.focusRingType = .default
