@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## 1.0.4 · 2026-09-23
+
+构建号 10。
+
+- 新增“连续异常次数”输入框，默认 3，支持保存、正整数校验和重置。
+- 延迟高和失败混合累计，每连续达到设定次数通知一次；默认第 3、6、9 次通知，正常、取消或停止后清零。
+- 状态颜色仍实时反映每次请求结果，历史详情记录本轮异常计数。
+- 读取旧配置时为新增次数补默认值，保留已有链接、阈值和间隔。
+- 在中英文 README 中说明项目由 AI 开发，以及人提供需求和反馈的协作方式。
+
+Build 10.
+
+- Add a persisted positive-integer consecutive-anomaly input, defaulting to 3 and included in Reset.
+- Count high latency and failures together, notifying after each group (by default, the 3rd, 6th, 9th, and so on). Normal responses, cancellation, or stopping clear the count.
+- Keep status colors immediate and include the current group count in history details.
+- Preserve existing settings when adding the new default limit during decoding.
+- Document the project's AI development process and human requirements/feedback in both READMEs.
+
 ## 1.0.3 · 2026-09-23
 
 构建号 9。

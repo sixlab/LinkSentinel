@@ -6,9 +6,11 @@
 
 A native macOS menu bar utility that periodically sends HEAD requests, records the time to receive response headers, and sends system notifications for high latency or failures. Built with SwiftUI and AppKit, with no third-party dependencies. Requires macOS 13 or later. The app's interface is currently in Simplified Chinese.
 
+**This project is developed entirely by AI.** Humans provide requirements and feedback; AI implements the code and interface, writes tests and documentation, and handles builds and releases.
+
 ## Download and install
 
-1. Download the appropriate version's `macOS-universal.zip` from [Releases](https://github.com/sixlab/LinkSentinel/releases/latest). It supports both Apple Silicon and Intel Macs. The HEAD probing behavior described below starts with 1.0.3; see each release's notes for its available features.
+1. Download the appropriate version's `macOS-universal.zip` from [Releases](https://github.com/sixlab/LinkSentinel/releases/latest). It supports both Apple Silicon and Intel Macs. HEAD probing starts with 1.0.3 and consecutive-anomaly notifications with 1.0.4; see each release's notes for its available features.
 2. Extract the archive and drag `链接哨兵.app` into Applications. Quit an older version with ⌘Q before upgrading.
 3. Open the app, click `开启监控` (Start monitoring), and allow notifications.
 
@@ -42,10 +44,10 @@ For development in Xcode, open `LinkSentinel.xcodeproj`, select the `LinkSentine
 
 ## Usage
 
-- Default URL: `https://www.gstatic.com/generate_204`. Alert threshold: **1,000 ms**. Interval: **5 seconds**.
+- Default URL: `https://www.gstatic.com/generate_204`. Alert threshold: **1,000 ms**. Interval: **5 seconds**. Consecutive anomalies: **3**.
 - The URL field is focused and its contents selected whenever the main window opens.
 - Click `开启监控` to start immediately, or `停止监控` to stop. Settings can be changed while stopped; the URL remains selectable for copying while monitoring.
-- While stopped, click `重置` (Reset) beside the monitoring button to restore the default URL, 1,000 ms threshold, and 5-second interval. The reset persists across app restarts and preserves history. The button is disabled while monitoring or preparing to start.
+- While stopped, click `重置` (Reset) beside the monitoring button to restore the default URL, 1,000 ms threshold, 5-second interval, and 3 consecutive anomalies. The reset persists across app restarts and preserves history. The button is disabled while monitoring or preparing to start.
 - Closing the window hides the Dock icon and keeps monitoring in the menu bar. Double-click the menu bar dot to reopen the window. Right-click it to open the window, stop monitoring, or quit. Minimizing keeps the Dock icon visible.
 - Keyboard shortcuts: ⌘Return to start/stop, ⌘W to close the window, and ⌘Q to quit.
 
@@ -59,12 +61,12 @@ For development in Xcode, open `LinkSentinel.xcodeproj`, select the `LinkSentine
 ## Requests and notifications
 
 - Uses HTTP HEAD, disables response caching, and does not follow redirects. Timing covers DNS, connection setup, TLS, and receipt of response headers; no response body is downloaded. This matches the request method of [Mihomo's ordinary URLTest](https://github.com/MetaCubeX/mihomo/blob/Meta/adapter/adapter.go), without its optional second request for unified delay. Actual numbers may still differ because of proxy routing and network-stack behavior.
-- **The alert threshold never cancels a request.** After response headers arrive, their latency is recorded. An HTTP 2xx/3xx response over the threshold is marked as high latency and triggers a notification. HTTP 204 is accepted. Servers that reject HEAD with HTTP 405 are recorded as failures, without an automatic GET fallback.
+- **The alert threshold never cancels a request.** After response headers arrive, their latency is recorded. An HTTP 2xx/3xx response over the threshold is marked as high latency and counts toward the consecutive-anomaly limit. HTTP 204 is accepted. Servers that reject HEAD with HTTP 405 are recorded as failures, without an automatic GET fallback.
 - Network errors, DNS/TLS errors, and HTTP 4xx/5xx responses are failures even if they also exceed the threshold. URLSession's default transport timeouts still apply; transport failures record the actual elapsed time and error.
-- Thresholds accept integer values from 1 to 3,600,000 milliseconds; intervals accept 0.1 to 86,400 seconds.
+- Thresholds accept integer values from 1 to 3,600,000 milliseconds; intervals accept 0.1 to 86,400 seconds. The consecutive-anomaly limit must be a positive integer and defaults to 3.
 - Requests run serially. Start times are separated by at least the configured interval. If a request takes longer, the next starts after it finishes; missed intervals do not create a backlog of parallel requests.
-- Each failed or slow request triggers one notification after it finishes. History shows start time, URL, response time, outcome, and notification delivery status. Hover over an outcome for details.
-- “Sent” means macOS accepted the notification. Banner visibility also depends on notification settings and Focus. Enable notifications for `链接哨兵` in System Settings → Notifications. Monitoring and history still work if permission is denied.
+- Failures and high-latency responses count together. A notification is attempted after each group of consecutive anomalies (by default, the 3rd, 6th, 9th, and so on). A normal response, cancellation, or stop clears the pending count; setting the limit to 1 notifies on every anomaly. State colors still reflect each request immediately. History shows start time, URL, response time, outcome, and notification delivery status. Hover over an outcome for details.
+- “Sent” means macOS accepted the notification. Banner visibility also depends on notification settings and Focus. Enable notifications for `链接哨兵` in System Settings → Notifications. Monitoring and history still work if permission is denied. Only rows that reach the notification limit are marked as denied; earlier rows show no notification.
 - Stopping cancels the current request and records it as cancelled without an alert. Relaunching leaves monitoring stopped.
 - Requests pause during system sleep and continue after waking. The app does not prevent sleep or install a background daemon.
 
@@ -73,7 +75,7 @@ For development in Xcode, open `LinkSentinel.xcodeproj`, select the `LinkSentine
 - History is stored in `~/Library/Application Support/LinkSentinel/history.sqlite`, with 100 records per page and no automatic deletion.
 - Click a history row to select it; hold ⌘ or Shift to select multiple rows. Choose `复制行` (Copy Row) from the context menu, or press ⌘C. Multiple rows are copied in display order, with tab-separated columns containing the full timestamp, URL, response duration, result, and notification status.
 - Settings are stored in the `com.local.linksentinel.desktop` UserDefaults domain. Settings from the older `com.local.LinkSentinel` domain are migrated once, without overwriting existing current settings.
-- On upgrading to 1.0.3, the saved old Google homepage default is replaced with the new 204 endpoint once. Custom URLs, thresholds, and intervals are preserved. Existing history keeps its original durations; the former `超时` label is displayed as `延迟高`.
+- On upgrading to 1.0.3, the saved old Google homepage default is replaced with the new 204 endpoint once. Custom URLs, thresholds, and intervals are preserved. Existing history keeps its original durations; the former `超时` label is displayed as `延迟高`. Version 1.0.4 defaults the new anomaly limit to 3 when reading older settings, preserving the other values.
 - History stays on your Mac. Monitoring sends requests only to the configured URL; there is no analytics service.
 - A database write failure stops monitoring and displays an error instead of silently replacing the history database.
 
