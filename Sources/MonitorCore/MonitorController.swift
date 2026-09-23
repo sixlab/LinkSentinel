@@ -11,6 +11,7 @@ public final class MonitorController: ObservableObject {
     @Published public var urlText: String
     @Published public var thresholdText: String
     @Published public var intervalText: String
+    @Published public var consecutiveAnomalyText: String
     @Published public private(set) var state: MonitorState = .stopped
     @Published public private(set) var isRequestInFlight = false
     @Published public private(set) var records: [RequestRecord] = []
@@ -39,12 +40,13 @@ public final class MonitorController: ObservableObject {
         self.defaults = defaults
         let saved = defaults.data(forKey: "monitor.settings").flatMap { try? JSONDecoder().decode(MonitorSettings.self, from: $0) }
         let settings = saved.flatMap {
-            try? MonitorSettings.validated(url: $0.url.absoluteString, threshold: String($0.thresholdMilliseconds), interval: String($0.intervalSeconds))
+            try? MonitorSettings.validated(url: $0.url.absoluteString, threshold: String($0.thresholdMilliseconds), interval: String($0.intervalSeconds), consecutiveAnomalies: String($0.consecutiveAnomalyLimit))
         } ?? .defaults
         urlText = settings.url.absoluteString
         thresholdText = String(settings.thresholdMilliseconds)
         intervalText = settings.intervalSeconds.rounded() == settings.intervalSeconds && settings.intervalSeconds.isFinite && settings.intervalSeconds <= 86400
             ? String(Int(settings.intervalSeconds)) : String(settings.intervalSeconds)
+        consecutiveAnomalyText = String(settings.consecutiveAnomalyLimit)
         reloadHistory()
     }
 
@@ -54,6 +56,7 @@ public final class MonitorController: ObservableObject {
         urlText = settings.url.absoluteString
         thresholdText = String(settings.thresholdMilliseconds)
         intervalText = String(Int(settings.intervalSeconds))
+        consecutiveAnomalyText = String(settings.consecutiveAnomalyLimit)
         defaults.removeObject(forKey: "monitor.settings")
         latestDetail = "已恢复默认设置，点击开启开始监控。"
     }
@@ -61,7 +64,7 @@ public final class MonitorController: ObservableObject {
     public func start() throws {
         guard !isShuttingDown else { throw ValidationError.message("应用正在退出，请稍候。") }
         guard !isRunning else { return }
-        let settings = try MonitorSettings.validated(url: urlText, threshold: thresholdText, interval: intervalText)
+        let settings = try MonitorSettings.validated(url: urlText, threshold: thresholdText, interval: intervalText, consecutiveAnomalies: consecutiveAnomalyText)
         urlText = settings.url.absoluteString
         defaults.set(try JSONEncoder().encode(settings), forKey: "monitor.settings")
         let token = UUID()
@@ -70,6 +73,8 @@ public final class MonitorController: ObservableObject {
         latestDetail = "正在发起首次请求…"
         task = Task { [weak self] in
             defer { self?.activeTasks[token] = nil }
+            // 计数仅属于本轮监控，停止或重启后不会继承旧请求的异常次数。
+            var pendingAnomalies = 0
             while !Task.isCancelled {
                 guard let self, self.generation == token else { return }
                 let tick = ProcessInfo.processInfo.systemUptime
@@ -77,7 +82,21 @@ public final class MonitorController: ObservableObject {
                 self.isRequestInFlight = true
                 let result = await self.probe.run(settings)
                 let isCurrent = self.generation == token && !Task.isCancelled
-                var record = RequestRecord(startedAt: date, url: settings.url.absoluteString, elapsedMilliseconds: result.elapsedMilliseconds, outcome: isCurrent ? result.outcome : .cancelled, statusCode: result.statusCode, detail: isCurrent ? result.detail : "监控已停止", notification: .notNeeded)
+                var detail = result.detail
+                var shouldNotify = false
+                if isCurrent {
+                    if result.shouldNotify {
+                        pendingAnomalies += 1
+                        detail += " · 本轮连续异常 \(pendingAnomalies)/\(settings.consecutiveAnomalyLimit) 次"
+                        if pendingAnomalies == settings.consecutiveAnomalyLimit {
+                            shouldNotify = true
+                            pendingAnomalies = 0
+                        }
+                    } else {
+                        pendingAnomalies = 0
+                    }
+                }
+                var record = RequestRecord(startedAt: date, url: settings.url.absoluteString, elapsedMilliseconds: result.elapsedMilliseconds, outcome: isCurrent ? result.outcome : .cancelled, statusCode: result.statusCode, detail: isCurrent ? detail : "监控已停止", notification: .notNeeded)
                 if isCurrent {
                     self.isRequestInFlight = false
                     switch result.outcome {
@@ -85,8 +104,8 @@ public final class MonitorController: ObservableObject {
                     case .failure: self.state = .failure
                     case .success, .cancelled: self.state = .monitoring
                     }
-                    self.latestDetail = result.detail
-                    if result.shouldNotify {
+                    self.latestDetail = detail
+                    if shouldNotify {
                         record.notification = await self.notifier.send(for: record)
                     }
                 }

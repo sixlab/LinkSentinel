@@ -40,6 +40,7 @@ struct MonitorView: View {
                 HStack(alignment: .bottom, spacing: 20) {
                     numberField("告警阈值", unit: "毫秒", text: $model.thresholdText)
                     numberField("时间间隔", unit: "秒", text: $model.intervalText)
+                    numberField("连续异常次数", unit: "次", text: $model.consecutiveAnomalyText)
                     Spacer()
                     Button {
                         model.resetSettings()
@@ -50,7 +51,7 @@ struct MonitorView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .disabled(model.isRunning || isStarting)
-                    .help("恢复默认链接、告警阈值和时间间隔")
+                    .help("恢复默认链接、告警阈值、时间间隔和连续异常次数")
                     .accessibilityIdentifier("resetSettings")
                     Button(action: toggle) {
                         Label(isStarting ? "准备中…" : model.isRunning ? "停止监控" : "开启监控", systemImage: model.isRunning ? "stop.fill" : "play.fill")
@@ -63,7 +64,7 @@ struct MonitorView: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .accessibilityIdentifier("toggleMonitoring")
                 }
-                Text("使用 HEAD 请求测量响应延迟，超过阈值时通知。")
+                Text("使用 HEAD 测量延迟；延迟高或失败每连续达到设定次数通知一次，正常响应后清零。")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Image(systemName: notifications.needsSettings ? "bell.slash" : "bell")
@@ -225,7 +226,7 @@ struct MonitorView: View {
 
     private func toggle() {
         if model.isRunning { model.stop(); return }
-        do { _ = try MonitorSettings.validated(url: model.urlText, threshold: model.thresholdText, interval: model.intervalText) }
+        do { _ = try MonitorSettings.validated(url: model.urlText, threshold: model.thresholdText, interval: model.intervalText, consecutiveAnomalies: model.consecutiveAnomalyText) }
         catch { errorMessage = error.localizedDescription; return }
         isStarting = true
         Task { @MainActor in

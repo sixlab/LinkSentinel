@@ -18,6 +18,7 @@ final class ControllerTests: XCTestCase {
             UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
         }
         model.intervalText = "0.1"
+        model.consecutiveAnomalyText = "1"
         try model.start()
         try await waitUntil { model.totalRecords == 1 }
         XCTAssertEqual(model.state, .timeout)
@@ -56,6 +57,7 @@ final class ControllerTests: XCTestCase {
         }
         model.urlText = "https://fixture.test/delayed-success"
         model.thresholdText = "80"
+        model.consecutiveAnomalyText = "1"
         try model.start()
         try await waitUntil { model.isRequestInFlight }
         try await Task.sleep(nanoseconds: 150_000_000)
@@ -103,6 +105,7 @@ final class ControllerTests: XCTestCase {
                 UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
             }
             model.urlText = "https://fixture.test/\(path)"
+            model.consecutiveAnomalyText = "1"
             try model.start()
             try await waitUntil { model.totalRecords == 1 }
             XCTAssertEqual(model.state.rawValue, "失败", path)
@@ -131,11 +134,112 @@ final class ControllerTests: XCTestCase {
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<200 {
+        for _ in 0..<400 {
             if condition() { return }
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         XCTFail("等待状态变更超时")
+    }
+
+    func testDefaultLimitNotifiesEveryThirdMixedAnomaly() async throws {
+        let outcomes: [ProbeOutcome] = [.timeout, .failure, .timeout, .failure, .failure, .timeout, .timeout, .failure, .failure]
+        let (model, directory, suite) = try makeController(probe: OutcomeSequenceProbe(outcomes))
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.intervalText = "0.1"
+        try model.start()
+        try await waitUntil { model.totalRecords >= 9 }
+        model.stop()
+        let records = Array(model.records.reversed().prefix(9))
+        XCTAssertEqual(records.map(\.notification), [.notNeeded, .notNeeded, .denied, .notNeeded, .notNeeded, .denied, .notNeeded, .notNeeded, .denied])
+        XCTAssertEqual(records.map(\.outcome), outcomes)
+        let persisted = try HistoryStore(url: directory.appendingPathComponent("history.sqlite"))
+        XCTAssertEqual(try persisted.page().filter { $0.notification == .denied }.count, 3)
+    }
+
+    func testSuccessClearsPendingAnomalies() async throws {
+        let outcomes: [ProbeOutcome] = [.failure, .timeout, .success, .failure, .timeout, .failure]
+        let (model, directory, suite) = try makeController(probe: OutcomeSequenceProbe(outcomes))
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.intervalText = "0.1"
+        try model.start()
+        try await waitUntil { model.totalRecords >= 6 }
+        model.stop()
+        XCTAssertEqual(Array(model.records.reversed().prefix(6)).map(\.notification), [.notNeeded, .notNeeded, .notNeeded, .notNeeded, .notNeeded, .denied])
+    }
+
+    func testRestartClearsPendingAnomalies() async throws {
+        let (model, directory, suite) = try makeController(probe: OutcomeSequenceProbe(Array(repeating: .failure, count: 5)))
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.intervalText = "0.1"
+        try model.start()
+        try await waitUntil { model.totalRecords >= 2 }
+        model.stop()
+        try model.start()
+        try await waitUntil { model.totalRecords >= 5 }
+        model.stop()
+        XCTAssertEqual(Array(model.records.reversed().prefix(5)).map(\.notification), [.notNeeded, .notNeeded, .notNeeded, .notNeeded, .denied])
+    }
+
+    func testCustomLimitPersistsAndControlsNotificationCadence() async throws {
+        let (model, directory, suite) = try makeController(probe: OutcomeSequenceProbe(Array(repeating: .failure, count: 4)))
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.intervalText = "0.1"
+        model.consecutiveAnomalyText = "2"
+        try model.start()
+        try await waitUntil { model.totalRecords >= 4 }
+        await model.shutdown()
+        XCTAssertEqual(Array(model.records.reversed().prefix(4)).map(\.notification), [.notNeeded, .denied, .notNeeded, .denied])
+        let restored = MonitorController(store: try HistoryStore(url: directory.appendingPathComponent("history.sqlite")), probe: SequenceProbe(), notifier: DeniedNotifier(), defaults: UserDefaults(suiteName: suite)!)
+        XCTAssertEqual(restored.consecutiveAnomalyText, "2")
+    }
+
+    func testResetRestoresAnomalyLimitAndPreservesHistory() async throws {
+        let (model, directory, suite) = try makeController(probe: SequenceProbe())
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.consecutiveAnomalyText = "8"
+        try model.start()
+        try await waitUntil { model.totalRecords == 1 }
+        model.stop()
+        model.resetSettings()
+        XCTAssertEqual(model.consecutiveAnomalyText, "3")
+        XCTAssertEqual(model.totalRecords, 1)
+        let restored = MonitorController(store: try HistoryStore(url: directory.appendingPathComponent("history.sqlite")), probe: SequenceProbe(), notifier: DeniedNotifier(), defaults: UserDefaults(suiteName: suite)!)
+        XCTAssertEqual(restored.consecutiveAnomalyText, "3")
+        XCTAssertEqual(restored.totalRecords, 1)
+    }
+
+    func testInvalidAnomalyLimitDoesNotStartOrOverwriteSavedSettings() throws {
+        let (model, directory, suite) = try makeController(probe: SequenceProbe())
+        defer {
+            model.stop()
+            try? FileManager.default.removeItem(at: directory)
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        model.consecutiveAnomalyText = "0"
+        XCTAssertThrowsError(try model.start())
+        XCTAssertFalse(model.isRunning)
+        XCTAssertEqual(model.totalRecords, 0)
+        XCTAssertNil(UserDefaults(suiteName: suite)?.data(forKey: "monitor.settings"))
     }
 
     func testRapidRestartIgnoresOldRequestCompletion() async throws {
@@ -189,6 +293,15 @@ private actor SequenceProbe: Probing {
         return count == 1
             ? ProbeResult(elapsedMilliseconds: 1000, outcome: firstOutcome, detail: firstOutcome.label)
             : ProbeResult(elapsedMilliseconds: 5, outcome: .success, statusCode: 200, detail: "HTTP 200")
+    }
+}
+
+private actor OutcomeSequenceProbe: Probing {
+    private var outcomes: [ProbeOutcome]
+    init(_ outcomes: [ProbeOutcome]) { self.outcomes = outcomes }
+    func run(_ settings: MonitorSettings) async -> ProbeResult {
+        let outcome = outcomes.isEmpty ? .success : outcomes.removeFirst()
+        return ProbeResult(elapsedMilliseconds: outcome == .timeout ? 1500 : 5, outcome: outcome, statusCode: outcome == .failure ? nil : 204, detail: outcome.label)
     }
 }
 

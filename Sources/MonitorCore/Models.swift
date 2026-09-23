@@ -4,16 +4,30 @@ public struct MonitorSettings: Codable, Equatable, Sendable {
     public var url: URL
     public var thresholdMilliseconds: Int
     public var intervalSeconds: Double
+    public var consecutiveAnomalyLimit: Int
 
-    public init(url: URL, thresholdMilliseconds: Int, intervalSeconds: Double) {
+    public init(url: URL, thresholdMilliseconds: Int, intervalSeconds: Double, consecutiveAnomalyLimit: Int = 3) {
         self.url = url
         self.thresholdMilliseconds = thresholdMilliseconds
         self.intervalSeconds = intervalSeconds
+        self.consecutiveAnomalyLimit = consecutiveAnomalyLimit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case url, thresholdMilliseconds, intervalSeconds, consecutiveAnomalyLimit
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        url = try values.decode(URL.self, forKey: .url)
+        thresholdMilliseconds = try values.decode(Int.self, forKey: .thresholdMilliseconds)
+        intervalSeconds = try values.decode(Double.self, forKey: .intervalSeconds)
+        consecutiveAnomalyLimit = try values.decodeIfPresent(Int.self, forKey: .consecutiveAnomalyLimit) ?? 3
     }
 
     public static let defaults = MonitorSettings(url: URL(string: "https://www.gstatic.com/generate_204")!, thresholdMilliseconds: 1000, intervalSeconds: 5)
 
-    public static func validated(url rawURL: String, threshold: String, interval: String) throws -> Self {
+    public static func validated(url rawURL: String, threshold: String, interval: String, consecutiveAnomalies: String = "3") throws -> Self {
         let text = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.contains(where: { $0.isWhitespace }),
               let components = URLComponents(string: text),
@@ -29,7 +43,10 @@ public struct MonitorSettings: Codable, Equatable, Sendable {
         guard let seconds = Double(interval.trimmingCharacters(in: .whitespaces)), seconds.isFinite, (0.1...86400).contains(seconds) else {
             throw ValidationError.message("时间间隔请输入 0.1～86400 之间的数字，单位为秒。")
         }
-        return Self(url: url, thresholdMilliseconds: milliseconds, intervalSeconds: seconds)
+        guard let count = Int(consecutiveAnomalies.trimmingCharacters(in: .whitespaces)), count > 0 else {
+            throw ValidationError.message("连续异常次数请输入大于 0 的整数。")
+        }
+        return Self(url: url, thresholdMilliseconds: milliseconds, intervalSeconds: seconds, consecutiveAnomalyLimit: count)
     }
 }
 
