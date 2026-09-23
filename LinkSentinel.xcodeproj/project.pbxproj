@@ -1,0 +1,43 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+7113A82E5DC147CA89E3DC62 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/MonitorCore/PreferencesMigration.swift; sourceTree = SOURCE_ROOT; };
+7C2E91EB2E284A2CA92B0449 = { isa = PBXBuildFile; fileRef = 7113A82E5DC147CA89E3DC62; };
+90C36F692D4B0B71895992D7 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LinkSentinel/AppDelegate.swift"; sourceTree = SOURCE_ROOT; };
+EE0B89BCCA32BDABBC4EDBD9 = { isa = PBXBuildFile; fileRef = 90C36F692D4B0B71895992D7; };
+5A94895DFB0E5B16C43BED7F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LinkSentinel/MonitorView.swift"; sourceTree = SOURCE_ROOT; };
+E011C8A334B3AFFDEEE196D4 = { isa = PBXBuildFile; fileRef = 5A94895DFB0E5B16C43BED7F; };
+6E37CE6F207C981E2517E3EE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LinkSentinel/NotificationService.swift"; sourceTree = SOURCE_ROOT; };
+92D2E6D73FE92813E65A99B1 = { isa = PBXBuildFile; fileRef = 6E37CE6F207C981E2517E3EE; };
+864773FBCFE1FE6ED986A35F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LinkSentinel/URLInput.swift"; sourceTree = SOURCE_ROOT; };
+CE3C1C8CD296349CA8637E77 = { isa = PBXBuildFile; fileRef = 864773FBCFE1FE6ED986A35F; };
+2B84667ADD80F9A904011F00 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/LinkSentinel/AppMain.swift"; sourceTree = SOURCE_ROOT; };
+B149F29BF8B1084590AB6B5D = { isa = PBXBuildFile; fileRef = 2B84667ADD80F9A904011F00; };
+A20CE6FD13CD616DDD8B3DB8 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MonitorCore/HistoryStore.swift"; sourceTree = SOURCE_ROOT; };
+4BB65473ACBB7E4465429D95 = { isa = PBXBuildFile; fileRef = A20CE6FD13CD616DDD8B3DB8; };
+5BD53603D1B869E58D553044 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MonitorCore/Models.swift"; sourceTree = SOURCE_ROOT; };
+8326A4BD0BDE6DDCA841EE95 = { isa = PBXBuildFile; fileRef = 5BD53603D1B869E58D553044; };
+5E75C1A2D8BBE785A8B8BBC2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MonitorCore/MonitorController.swift"; sourceTree = SOURCE_ROOT; };
+4B1FAD2C1AA6021B41042848 = { isa = PBXBuildFile; fileRef = 5E75C1A2D8BBE785A8B8BBC2; };
+BB7F317A9217691C686557F3 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MonitorCore/NetworkProbe.swift"; sourceTree = SOURCE_ROOT; };
+94D947A8A2F27AEA8255E6D9 = { isa = PBXBuildFile; fileRef = BB7F317A9217691C686557F3; };
+0112DAE3F84CB4DF5179BE01 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = SOURCE_ROOT; };
+7DA019A7CC1F40D8901681F0 = { isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = SOURCE_ROOT; };
+C03781112F2329CDB9B49CD4 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+BA91BD239DD94622A6E9BDAE = { isa = PBXBuildFile; fileRef = C03781112F2329CDB9B49CD4; };
+F78A71AF8BBF8CC2F6F31354 = { isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
+38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "链接哨兵.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+BCE16DD0260827ECF338C787 = { isa = PBXGroup; name = Sources; sourceTree = "<group>"; children = (7113A82E5DC147CA89E3DC62,90C36F692D4B0B71895992D7,5A94895DFB0E5B16C43BED7F,6E37CE6F207C981E2517E3EE,864773FBCFE1FE6ED986A35F,2B84667ADD80F9A904011F00,A20CE6FD13CD616DDD8B3DB8,5BD53603D1B869E58D553044,5E75C1A2D8BBE785A8B8BBC2,BB7F317A9217691C686557F3); };
+FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (38A007151ABE87CC01A5B6E9); };
+DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; sourceTree = "<group>"; children = (BCE16DD0260827ECF338C787,0112DAE3F84CB4DF5179BE01,7DA019A7CC1F40D8901681F0,C03781112F2329CDB9B49CD4,F78A71AF8BBF8CC2F6F31354,FBDC4F23F93125BBEEAE800C); };
+A1C3CEACCD4F322048E69D2D = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; files = (7C2E91EB2E284A2CA92B0449,EE0B89BCCA32BDABBC4EDBD9,E011C8A334B3AFFDEEE196D4,92D2E6D73FE92813E65A99B1,CE3C1C8CD296349CA8637E77,B149F29BF8B1084590AB6B5D,4BB65473ACBB7E4465429D95,8326A4BD0BDE6DDCA841EE95,4B1FAD2C1AA6021B41042848,94D947A8A2F27AEA8255E6D9); };
+326A678791C89F5FAABDFBFA = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; files = (); };
+FF4A15EEA61D4A3B097C1C27 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; files = (BA91BD239DD94622A6E9BDAE); };
+ED8772ADEC3A6C25161BC957 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 13.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; };
+4D8F54E7CBAF670D9F6C230D = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "链接哨兵"; EXECUTABLE_NAME = LinkSentinel; PRODUCT_MODULE_NAME = LinkSentinel; PRODUCT_BUNDLE_IDENTIFIER = com.local.linksentinel.desktop; INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO; CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-"; ENABLE_APP_SANDBOX = NO; COMBINE_HIDPI_IMAGES = YES; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; OTHER_LDFLAGS = "$(inherited) -lsqlite3"; }; };
+00F209874A1F7309F6DCEAA7 = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 13.0; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; }; };
+1A6EFC2CD0AF63DD14BE0438 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_NAME = "链接哨兵"; EXECUTABLE_NAME = LinkSentinel; PRODUCT_MODULE_NAME = LinkSentinel; PRODUCT_BUNDLE_IDENTIFIER = com.local.linksentinel.desktop; INFOPLIST_FILE = Resources/Info.plist; GENERATE_INFOPLIST_FILE = NO; CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-"; ENABLE_APP_SANDBOX = NO; COMBINE_HIDPI_IMAGES = YES; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; OTHER_LDFLAGS = "$(inherited) -lsqlite3"; }; };
+640DC9EFD529235A8D9E2727 = { isa = XCConfigurationList; buildConfigurations = (ED8772ADEC3A6C25161BC957,00F209874A1F7309F6DCEAA7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+976B52545947CA66FD9EF2A4 = { isa = XCConfigurationList; buildConfigurations = (4D8F54E7CBAF670D9F6C230D,1A6EFC2CD0AF63DD14BE0438); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = 976B52545947CA66FD9EF2A4; buildPhases = (A1C3CEACCD4F322048E69D2D,326A678791C89F5FAABDFBFA,FF4A15EEA61D4A3B097C1C27); buildRules = (); dependencies = (); name = LinkSentinel; productName = LinkSentinel; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; };
+98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 640DC9EFD529235A8D9E2727; compatibilityVersion = "Xcode 14.0"; developmentRegion = zh_CN; hasScannedForEncodings = 0; knownRegions = (zh_CN,en,Base); mainGroup = DC76E9F0C0006E8F919E0C51; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); };
+}; rootObject = 98F54143AB4E86B28C3AFEE0; }
