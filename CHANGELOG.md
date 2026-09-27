@@ -1,5 +1,25 @@
 # 更新记录 / Changelog
 
+## 1.0.5 · 2026-09-27
+
+构建号 11。
+
+- 按固定发起间隔调度请求，允许慢请求重叠，通知发送不阻塞后续请求。
+- 请求达到告警阈值仍未完成时立即记录延迟高，失败立即记录；每个请求仅判定一次连续异常。
+- 请求继续完成并更新同一条历史的实际耗时；进行中的慢请求显示耗时下限。
+- 并发时按判定事件顺序累计，迟到的完成回调不重复计数、不覆盖较新的状态。
+- 在网络队列上协调阈值与响应完成，避免界面卡顿把正常请求误报为延迟高。
+- 停止取消全部请求与阈值计时，退出等待落盘，兼容原有历史并恢复中断记录。
+
+Build 11.
+
+- Launch requests on a fixed cadence, allowing overlap without waiting for slow responses or notification delivery.
+- Judge unfinished requests at the alert threshold and record failures immediately, counting each request only once.
+- Keep requests running and update the same history row with the final duration; show a lower bound while waiting.
+- Count verdicts in detection order and prevent late completions from recounting or replacing newer status.
+- Coordinate threshold and completion events on the network queue so UI stalls cannot misclassify normal responses as high latency.
+- Cancel all requests and deadlines on stop, await persistence on quit, and recover interrupted rows while preserving existing history.
+
 ## 1.0.4 · 2026-09-23
 
 构建号 10。
