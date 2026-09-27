@@ -1,7 +1,14 @@
 import Foundation
 
 public protocol Probing: Sendable {
-    func run(_ settings: MonitorSettings) async -> ProbeResult
+    // 在网络执行上下文中判定阈值，不能把结果交付到界面的延迟计入网络耗时。
+    func run(_ settings: MonitorSettings, onThreshold: @escaping @Sendable (Double) -> Void) async -> ProbeResult
+}
+
+public extension Probing {
+    func run(_ settings: MonitorSettings) async -> ProbeResult {
+        await run(settings, onThreshold: { _ in })
+    }
 }
 
 public struct NetworkProbe: Probing, @unchecked Sendable {
@@ -11,8 +18,8 @@ public struct NetworkProbe: Probing, @unchecked Sendable {
         self.configuration = configuration
     }
 
-    public func run(_ settings: MonitorSettings) async -> ProbeResult {
-        let operation = ProbeOperation(settings: settings, configuration: configuration)
+    public func run(_ settings: MonitorSettings, onThreshold: @escaping @Sendable (Double) -> Void) async -> ProbeResult {
+        let operation = ProbeOperation(settings: settings, configuration: configuration, onThreshold: onThreshold)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { operation.start($0) }
         } onCancel: {
@@ -27,6 +34,8 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
     private let queue = DispatchQueue(label: "LinkSentinel.probe")
     private let settings: MonitorSettings
     private let configuration: URLSessionConfiguration
+    private let onThreshold: @Sendable (Double) -> Void
+    private var deadlineWork: DispatchWorkItem?
     private var continuation: CheckedContinuation<ProbeResult, Never>?
     private var session: URLSession?
     private var started = DispatchTime.now()
@@ -34,9 +43,10 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
     private var finished = false
     private var cancelled = false
 
-    init(settings: MonitorSettings, configuration: URLSessionConfiguration) {
+    init(settings: MonitorSettings, configuration: URLSessionConfiguration, onThreshold: @escaping @Sendable (Double) -> Void) {
         self.settings = settings
         self.configuration = configuration.copy() as! URLSessionConfiguration
+        self.onThreshold = onThreshold
         super.init()
     }
 
@@ -45,11 +55,17 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
             self.continuation = continuation
             started = .now()
             guard !cancelled else { finish(.cancelled, "监控已停止"); return }
+            // 阈值和完成回调使用同一队列仲裁；阈值只发事件，不取消请求。
+            let deadline = DispatchWorkItem { [weak self] in
+                guard let self, !self.finished, !self.cancelled else { return }
+                self.onThreshold(self.elapsedMilliseconds)
+            }
+            deadlineWork = deadline
+            queue.asyncAfter(deadline: started + .milliseconds(settings.thresholdMilliseconds), execute: deadline)
             configuration.urlCache = nil
             configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             configuration.httpCookieStorage = nil
             configuration.waitsForConnectivity = false
-            // 告警阈值只用于完成后的耗时判断；传输仍沿用 URLSession 的网络超时设置。
             let delegateQueue = OperationQueue()
             delegateQueue.maxConcurrentOperationCount = 1
             delegateQueue.underlyingQueue = queue
@@ -71,11 +87,17 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
     private func finish(_ outcome: ProbeOutcome, _ detail: String) {
         guard !finished, let continuation else { return }
         finished = true
+        deadlineWork?.cancel()
+        deadlineWork = nil
         self.continuation = nil
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        let elapsed = elapsedMilliseconds
         session?.invalidateAndCancel()
         session = nil
         continuation.resume(returning: ProbeResult(elapsedMilliseconds: elapsed, outcome: outcome, statusCode: responseCode, detail: detail))
+    }
+
+    private var elapsedMilliseconds: Double {
+        Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
@@ -113,8 +135,7 @@ private final class ProbeOperation: NSObject, URLSessionDataDelegate, @unchecked
         if cancelled {
             finish(.cancelled, "监控已停止")
         } else if let responseCode, (200..<400).contains(responseCode) {
-            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-            if elapsed > Double(settings.thresholdMilliseconds) {
+            if elapsedMilliseconds >= Double(settings.thresholdMilliseconds) {
                 finish(.timeout, "HEAD · HTTP \(responseCode) · 延迟高，超过 \(settings.thresholdMilliseconds) 毫秒阈值")
             } else {
                 finish(.success, "HEAD · HTTP \(responseCode)")

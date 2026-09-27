@@ -20,10 +20,10 @@ final class ControllerTests: XCTestCase {
         model.intervalText = "0.1"
         model.consecutiveAnomalyText = "1"
         try model.start()
-        try await waitUntil { model.totalRecords == 1 }
+        try await waitUntil { model.completedRecordCount == 1 }
         XCTAssertEqual(model.state, .timeout)
         XCTAssertEqual(model.records.first?.notification, .denied)
-        try await waitUntil { model.totalRecords >= 2 }
+        try await waitUntil { model.completedRecordCount >= 2 }
         XCTAssertEqual(model.state, .monitoring)
         XCTAssertEqual(model.records.first?.notification, .notNeeded)
         model.stop()
@@ -40,13 +40,13 @@ final class ControllerTests: XCTestCase {
             UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
         }
         try model.start()
-        try await waitUntil { model.totalRecords == 1 }
+        try await waitUntil { model.completedRecordCount == 1 }
         XCTAssertEqual(model.records.first?.url, "https://www.gstatic.com/generate_204")
         XCTAssertEqual(model.records.first?.statusCode, 204)
         XCTAssertEqual(model.records.first?.outcome, .success)
     }
 
-    func testSlowRequestPersistsTotalDurationOnlyAfterCompletion() async throws {
+    func testSlowRequestAlertsAtThresholdThenPersistsTotalDuration() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FixtureURLProtocol.self]
         let (model, directory, suite) = try makeController(probe: NetworkProbe(configuration: configuration))
@@ -62,8 +62,11 @@ final class ControllerTests: XCTestCase {
         try await waitUntil { model.isRequestInFlight }
         try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertTrue(model.isRequestInFlight)
-        XCTAssertEqual(model.totalRecords, 0)
-        try await waitUntil { model.totalRecords == 1 }
+        XCTAssertEqual(model.totalRecords, 1)
+        XCTAssertEqual(model.records.first?.outcome, .timeout)
+        XCTAssertEqual(model.records.first?.notification, .denied)
+        XCTAssertTrue(model.records.first?.isInFlight == true)
+        try await waitUntil { model.completedRecordCount == 1 }
         XCTAssertEqual(model.state, .timeout)
         XCTAssertEqual(model.records.first?.statusCode, 200)
         XCTAssertEqual(model.records.first?.notification, .denied)
@@ -86,7 +89,7 @@ final class ControllerTests: XCTestCase {
         try model.start()
         try await waitUntil { model.isRequestInFlight }
         model.stop()
-        try await waitUntil { model.totalRecords == 1 }
+        try await waitUntil { model.completedRecordCount == 1 }
         XCTAssertEqual(model.state, .stopped)
         XCTAssertEqual(model.records.first?.outcome, .cancelled)
         XCTAssertEqual(model.records.first?.notification, .notNeeded)
@@ -107,7 +110,7 @@ final class ControllerTests: XCTestCase {
             model.urlText = "https://fixture.test/\(path)"
             model.consecutiveAnomalyText = "1"
             try model.start()
-            try await waitUntil { model.totalRecords == 1 }
+            try await waitUntil { model.completedRecordCount == 1 }
             XCTAssertEqual(model.state.rawValue, "失败", path)
             XCTAssertTrue(model.isRunning)
             XCTAssertEqual(model.records.first?.outcome, .failure)
@@ -124,9 +127,9 @@ final class ControllerTests: XCTestCase {
         }
         model.intervalText = "0.1"
         try model.start()
-        try await waitUntil { model.totalRecords == 1 }
+        try await waitUntil { model.completedRecordCount == 1 }
         XCTAssertEqual(model.state.rawValue, "失败")
-        try await waitUntil { model.totalRecords >= 2 }
+        try await waitUntil { model.completedRecordCount >= 2 }
         XCTAssertEqual(model.state, .monitoring)
         XCTAssertEqual(model.records.first?.outcome, .success)
         model.stop()
@@ -151,7 +154,7 @@ final class ControllerTests: XCTestCase {
         }
         model.intervalText = "0.1"
         try model.start()
-        try await waitUntil { model.totalRecords >= 9 }
+        try await waitUntil { model.completedRecordCount >= 9 }
         model.stop()
         let records = Array(model.records.reversed().prefix(9))
         XCTAssertEqual(records.map(\.notification), [.notNeeded, .notNeeded, .denied, .notNeeded, .notNeeded, .denied, .notNeeded, .notNeeded, .denied])
@@ -170,7 +173,7 @@ final class ControllerTests: XCTestCase {
         }
         model.intervalText = "0.1"
         try model.start()
-        try await waitUntil { model.totalRecords >= 6 }
+        try await waitUntil { model.completedRecordCount >= 6 }
         model.stop()
         XCTAssertEqual(Array(model.records.reversed().prefix(6)).map(\.notification), [.notNeeded, .notNeeded, .notNeeded, .notNeeded, .notNeeded, .denied])
     }
@@ -184,10 +187,10 @@ final class ControllerTests: XCTestCase {
         }
         model.intervalText = "0.1"
         try model.start()
-        try await waitUntil { model.totalRecords >= 2 }
+        try await waitUntil { model.completedRecordCount >= 2 }
         model.stop()
         try model.start()
-        try await waitUntil { model.totalRecords >= 5 }
+        try await waitUntil { model.completedRecordCount >= 5 }
         model.stop()
         XCTAssertEqual(Array(model.records.reversed().prefix(5)).map(\.notification), [.notNeeded, .notNeeded, .notNeeded, .notNeeded, .denied])
     }
@@ -202,7 +205,7 @@ final class ControllerTests: XCTestCase {
         model.intervalText = "0.1"
         model.consecutiveAnomalyText = "2"
         try model.start()
-        try await waitUntil { model.totalRecords >= 4 }
+        try await waitUntil { model.completedRecordCount >= 4 }
         await model.shutdown()
         XCTAssertEqual(Array(model.records.reversed().prefix(4)).map(\.notification), [.notNeeded, .denied, .notNeeded, .denied])
         let restored = MonitorController(store: try HistoryStore(url: directory.appendingPathComponent("history.sqlite")), probe: SequenceProbe(), notifier: DeniedNotifier(), defaults: UserDefaults(suiteName: suite)!)
@@ -218,7 +221,7 @@ final class ControllerTests: XCTestCase {
         }
         model.consecutiveAnomalyText = "8"
         try model.start()
-        try await waitUntil { model.totalRecords == 1 }
+        try await waitUntil { model.completedRecordCount == 1 }
         model.stop()
         model.resetSettings()
         XCTAssertEqual(model.consecutiveAnomalyText, "3")
@@ -257,7 +260,7 @@ final class ControllerTests: XCTestCase {
         model.stop()
         model.urlText = "https://fixture.test/ok"
         try model.start()
-        try await waitUntil { model.totalRecords == 2 }
+        try await waitUntil { model.completedRecordCount == 2 }
         XCTAssertEqual(model.state, .monitoring)
         XCTAssertEqual(model.records.filter { $0.outcome == .success }.count, 1)
         XCTAssertEqual(model.records.filter { $0.outcome == .cancelled }.count, 1)
@@ -288,7 +291,7 @@ private actor SequenceProbe: Probing {
     private var count = 0
     private let firstOutcome: ProbeOutcome
     init(firstOutcome: ProbeOutcome = .timeout) { self.firstOutcome = firstOutcome }
-    func run(_ settings: MonitorSettings) async -> ProbeResult {
+    func run(_ settings: MonitorSettings, onThreshold: @escaping @Sendable (Double) -> Void) async -> ProbeResult {
         count += 1
         return count == 1
             ? ProbeResult(elapsedMilliseconds: 1000, outcome: firstOutcome, detail: firstOutcome.label)
@@ -299,7 +302,7 @@ private actor SequenceProbe: Probing {
 private actor OutcomeSequenceProbe: Probing {
     private var outcomes: [ProbeOutcome]
     init(_ outcomes: [ProbeOutcome]) { self.outcomes = outcomes }
-    func run(_ settings: MonitorSettings) async -> ProbeResult {
+    func run(_ settings: MonitorSettings, onThreshold: @escaping @Sendable (Double) -> Void) async -> ProbeResult {
         let outcome = outcomes.isEmpty ? .success : outcomes.removeFirst()
         return ProbeResult(elapsedMilliseconds: outcome == .timeout ? 1500 : 5, outcome: outcome, statusCode: outcome == .failure ? nil : 204, detail: outcome.label)
     }
@@ -308,4 +311,9 @@ private actor OutcomeSequenceProbe: Probing {
 @MainActor
 private struct DeniedNotifier: AlertSending {
     func send(for record: RequestRecord) async -> NotificationDelivery { .denied }
+}
+
+@MainActor
+private extension MonitorController {
+    var completedRecordCount: Int { records.filter { !$0.isInFlight }.count }
 }

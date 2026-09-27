@@ -10,7 +10,7 @@ A native macOS menu bar utility that periodically sends HEAD requests, records t
 
 ## Download and install
 
-1. Download the appropriate version's `macOS-universal.zip` from [Releases](https://github.com/sixlab/LinkSentinel/releases/latest). It supports both Apple Silicon and Intel Macs. HEAD probing starts with 1.0.3 and consecutive-anomaly notifications with 1.0.4; see each release's notes for its available features.
+1. Download the appropriate version's `macOS-universal.zip` from [Releases](https://github.com/sixlab/LinkSentinel/releases/latest). It supports both Apple Silicon and Intel Macs. HEAD probing starts with 1.0.3, consecutive-anomaly notifications with 1.0.4, and fixed launch intervals/immediate threshold detection with 1.0.5; see each release's notes for its available features.
 2. Extract the archive and drag `链接哨兵.app` into Applications. Quit an older version with ⌘Q before upgrading.
 3. Open the app, click `开启监控` (Start monitoring), and allow notifications.
 
@@ -54,25 +54,25 @@ For development in Xcode, open `LinkSentinel.xcodeproj`, select the `LinkSentine
 | Color | Status | Meaning |
 | --- | --- | --- |
 | Gray | 未开启 | Stopped |
-| Green | 监控中 | Monitoring; latest completed request was normal |
-| Yellow | 延迟高 | High latency: response headers arrived after the alert threshold |
+| Green | 监控中 | Monitoring; latest verdict was normal |
+| Yellow | 延迟高 | High latency: request was still unfinished at its alert threshold |
 | Red | 失败 | Network, DNS, TLS, or HTTP failure |
 
 ## Requests and notifications
 
 - Uses HTTP HEAD, disables response caching, and does not follow redirects. Timing covers DNS, connection setup, TLS, and receipt of response headers; no response body is downloaded. This matches the request method of [Mihomo's ordinary URLTest](https://github.com/MetaCubeX/mihomo/blob/Meta/adapter/adapter.go), without its optional second request for unified delay. Actual numbers may still differ because of proxy routing and network-stack behavior.
-- **The alert threshold never cancels a request.** After response headers arrive, their latency is recorded. An HTTP 2xx/3xx response over the threshold is marked as high latency and counts toward the consecutive-anomaly limit. HTTP 204 is accepted. Servers that reject HEAD with HTTP 405 are recorded as failures, without an automatic GET fallback.
-- Network errors, DNS/TLS errors, and HTTP 4xx/5xx responses are failures even if they also exceed the threshold. URLSession's default transport timeouts still apply; transport failures record the actual elapsed time and error.
+- **The alert threshold never cancels a request.** If a request is still unfinished at its deadline, it is immediately marked as high latency and counted toward the consecutive-anomaly limit. The request continues; its eventual response updates the same history row with the final duration, without counting or notifying again. HTTP 204 is accepted. Servers that reject HEAD with HTTP 405 are recorded as failures, without an automatic GET fallback.
+- Network errors, DNS/TLS errors, and HTTP 4xx/5xx responses are recorded as failures immediately. If the request was already judged at its deadline, a later failure only updates its history row and is not counted again. URLSession's default transport timeouts still apply; transport failures record the actual elapsed time and error.
 - Thresholds accept integer values from 1 to 3,600,000 milliseconds; intervals accept 0.1 to 86,400 seconds. The consecutive-anomaly limit must be a positive integer and defaults to 3.
-- Requests run serially. Start times are separated by at least the configured interval. If a request takes longer, the next starts after it finishes; missed intervals do not create a backlog of parallel requests.
-- Failures and high-latency responses count together. A notification is attempted after each group of consecutive anomalies (by default, the 3rd, 6th, 9th, and so on). A normal response, cancellation, or stop clears the pending count; setting the limit to 1 notifies on every anomaly. State colors still reflect each request immediately. History shows start time, URL, response time, outcome, and notification delivery status. Hover over an outcome for details.
+- Requests launch at fixed intervals and can overlap: a 5-second interval starts requests at approximately 00:00, 00:05, 00:10, and so on. Slow responses and notification delivery do not delay later launches. OS scheduling may add small delays; waking or recovering from a long scheduling delay does not trigger a burst of missed requests.
+- Failures and high-latency verdicts count together in the order they are detected. A notification is attempted after each group of consecutive anomalies (by default, the 3rd, 6th, 9th, and so on). A normal verdict, cancellation, or stop clears the pending count; an eventual successful response to a request already judged slow does not count as a new normal verdict. Late old responses cannot overwrite newer status. Setting the limit to 1 notifies on every anomaly. State colors still reflect each request immediately. History adds a pending row when each request starts, shows a lower-bound duration while a slow request is still running, and updates that row on completion. With a 5-second interval, 1,000 ms threshold, and anomaly limit of 2, two slow requests are judged around 00:01 and 00:06, triggering a notification around 00:06. Hover over outcomes for details.
 - “Sent” means macOS accepted the notification. Banner visibility also depends on notification settings and Focus. Enable notifications for `链接哨兵` in System Settings → Notifications. Monitoring and history still work if permission is denied. Only rows that reach the notification limit are marked as denied; earlier rows show no notification.
-- Stopping cancels the current request and records it as cancelled without an alert. Relaunching leaves monitoring stopped.
+- Stopping cancels all outstanding requests and their deadline timers, marking the requests cancelled without new alerts. Relaunching leaves monitoring stopped.
 - Requests pause during system sleep and continue after waking. The app does not prevent sleep or install a background daemon.
 
 ## Local data
 
-- History is stored in `~/Library/Application Support/LinkSentinel/history.sqlite`, with 100 records per page and no automatic deletion.
+- History is stored in `~/Library/Application Support/LinkSentinel/history.sqlite`, with 100 records per page and no automatic deletion. Rows remain in launch order when updated. On restarting after an interruption, unfinished rows are marked interrupted and retain their last known duration.
 - Click a history row to select it; hold ⌘ or Shift to select multiple rows. Choose `复制行` (Copy Row) from the context menu, or press ⌘C. Multiple rows are copied in display order, with tab-separated columns containing the full timestamp, URL, response duration, result, and notification status.
 - Settings are stored in the `com.local.linksentinel.desktop` UserDefaults domain. Settings from the older `com.local.LinkSentinel` domain are migrated once, without overwriting existing current settings.
 - On upgrading to 1.0.3, the saved old Google homepage default is replaced with the new 204 endpoint once. Custom URLs, thresholds, and intervals are preserved. Existing history keeps its original durations; the former `超时` label is displayed as `延迟高`. Version 1.0.4 defaults the new anomaly limit to 3 when reading older settings, preserving the other values.

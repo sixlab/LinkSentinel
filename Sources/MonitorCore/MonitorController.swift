@@ -31,6 +31,10 @@ public final class MonitorController: ObservableObject {
     private var task: Task<Void, Never>?
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     private var generation: UUID?
+    private var requests: [UUID: ActiveRequest] = [:]
+    private var pendingAnomalies = 0
+    private var latestJudgedID: UUID?
+    private var writeFailure: String?
     private var isShuttingDown = false
 
     public init(store: HistoryStore, probe: any Probing = NetworkProbe(), notifier: any AlertSending, defaults: UserDefaults = .standard) {
@@ -47,6 +51,8 @@ public final class MonitorController: ObservableObject {
         intervalText = settings.intervalSeconds.rounded() == settings.intervalSeconds && settings.intervalSeconds.isFinite && settings.intervalSeconds <= 86400
             ? String(Int(settings.intervalSeconds)) : String(settings.intervalSeconds)
         consecutiveAnomalyText = String(settings.consecutiveAnomalyLimit)
+        do { try store.recoverInterruptedRequests() }
+        catch { writeFailure = error.localizedDescription }
         reloadHistory()
     }
 
@@ -71,60 +77,145 @@ public final class MonitorController: ObservableObject {
         generation = token
         state = .monitoring
         latestDetail = "正在发起首次请求…"
+        pendingAnomalies = 0
+        latestJudgedID = nil
+        writeFailure = nil
         task = Task { [weak self] in
-            defer { self?.activeTasks[token] = nil }
-            // 计数仅属于本轮监控，停止或重启后不会继承旧请求的异常次数。
-            var pendingAnomalies = 0
+            let clock = ContinuousClock()
+            var nextLaunch = clock.now
             while !Task.isCancelled {
                 guard let self, self.generation == token else { return }
-                let tick = ProcessInfo.processInfo.systemUptime
-                let date = Date()
-                self.isRequestInFlight = true
-                let result = await self.probe.run(settings)
-                let isCurrent = self.generation == token && !Task.isCancelled
-                var detail = result.detail
-                var shouldNotify = false
-                if isCurrent {
-                    if result.shouldNotify {
-                        pendingAnomalies += 1
-                        detail += " · 本轮连续异常 \(pendingAnomalies)/\(settings.consecutiveAnomalyLimit) 次"
-                        if pendingAnomalies == settings.consecutiveAnomalyLimit {
-                            shouldNotify = true
-                            pendingAnomalies = 0
-                        }
-                    } else {
-                        pendingAnomalies = 0
-                    }
-                }
-                var record = RequestRecord(startedAt: date, url: settings.url.absoluteString, elapsedMilliseconds: result.elapsedMilliseconds, outcome: isCurrent ? result.outcome : .cancelled, statusCode: result.statusCode, detail: isCurrent ? detail : "监控已停止", notification: .notNeeded)
-                if isCurrent {
-                    self.isRequestInFlight = false
-                    switch result.outcome {
-                    case .timeout: self.state = .timeout
-                    case .failure: self.state = .failure
-                    case .success, .cancelled: self.state = .monitoring
-                    }
-                    self.latestDetail = detail
-                    if shouldNotify {
-                        record.notification = await self.notifier.send(for: record)
-                    }
-                }
-                self.persist(record)
-                guard self.generation == token, !Task.isCancelled else { return }
-                let remaining = settings.intervalSeconds - (ProcessInfo.processInfo.systemUptime - tick)
-                if remaining > 0 {
-                    do { try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
-                    catch { return }
-                }
+                self.launch(settings, token: token)
+                guard self.generation == token else { return }
+                nextLaunch += .seconds(settings.intervalSeconds)
+                // 睡眠唤醒或主线程长时间受阻时只恢复一次，不补发积压请求。
+                if nextLaunch <= clock.now { nextLaunch = clock.now + .seconds(settings.intervalSeconds) }
+                do { try await clock.sleep(until: nextLaunch) }
+                catch { return }
             }
         }
-        activeTasks[token] = task
+    }
+
+    private func launch(_ settings: MonitorSettings, token: UUID) {
+        let record = RequestRecord(startedAt: Date(), url: settings.url.absoluteString, elapsedMilliseconds: 0,
+                                   outcome: .pending, statusCode: nil, detail: "请求进行中…", notification: .notNeeded, phase: .running)
+        let sequence: Int64
+        do { sequence = try store.append(record) }
+        catch { storageFailed(error, record: record); return }
+        let request = ActiveRequest(record: record, sequence: sequence, settings: settings, token: token)
+        requests[record.id] = request
+        isRequestInFlight = true
+        reloadHistory()
+        let worker = Task { [weak self, probe] in
+            // 网络队列负责仲裁，流保证阈值事件先于最终结果处理。
+            let (thresholds, continuation) = AsyncStream<Double>.makeStream()
+            let operation = Task.detached {
+                let result = await probe.run(settings, onThreshold: { continuation.yield($0) })
+                continuation.finish()
+                return result
+            }
+            let result = await withTaskCancellationHandler {
+                for await elapsed in thresholds {
+                    self?.thresholdReached(request, elapsed: elapsed)
+                }
+                return await operation.value
+            } onCancel: {
+                operation.cancel()
+            }
+            guard let self else { return }
+            defer { self.activeTasks[record.id] = nil }
+            self.finish(request, result: result, cancelled: Task.isCancelled)
+        }
+        activeTasks[record.id] = worker
+    }
+
+    private func thresholdReached(_ request: ActiveRequest, elapsed: Double) {
+        guard generation == request.token, !Task.isCancelled,
+              requests[request.record.id] != nil, !request.wasJudged else { return }
+        request.record.elapsedMilliseconds = elapsed
+        request.record.outcome = .timeout
+        request.record.detail = "已达到 \(request.settings.thresholdMilliseconds) 毫秒阈值，仍在等待响应"
+        let notify = judge(request)
+        save(request)
+        if notify { sendNotification(request) }
+    }
+
+    // 按判定事件的先后更新连续计数。迟到的响应只更新原记录，不再次计数。
+    private func judge(_ request: ActiveRequest) -> Bool {
+        request.wasJudged = true
+        var notify = false
+        if request.record.outcome == .timeout || request.record.outcome == .failure {
+            pendingAnomalies += 1
+            request.countDetail = " · 本轮连续异常 \(pendingAnomalies)/\(request.settings.consecutiveAnomalyLimit) 次"
+            request.record.detail += request.countDetail
+            if pendingAnomalies == request.settings.consecutiveAnomalyLimit {
+                pendingAnomalies = 0
+                notify = true
+            }
+        } else {
+            pendingAnomalies = 0
+        }
+        latestJudgedID = request.record.id
+        showState(request.record)
+        return notify
+    }
+
+    private func finish(_ request: ActiveRequest, result: ProbeResult, cancelled: Bool) {
+        request.record.elapsedMilliseconds = result.elapsedMilliseconds
+        request.record.statusCode = result.statusCode
+        request.record.phase = .finished
+        let isCurrent = generation == request.token && !cancelled
+        var notify = false
+        if isCurrent {
+            // 已在阈值时标记的延迟高不会被迟到的成功响应改回正常。
+            request.record.outcome = request.wasJudged && result.outcome == .success ? .timeout : result.outcome
+            request.record.detail = result.detail + request.countDetail
+            if !request.wasJudged {
+                notify = judge(request)
+            } else if latestJudgedID == request.record.id {
+                showState(request.record)
+            }
+        } else {
+            request.record.outcome = .cancelled
+            request.record.detail = "监控已停止" + request.countDetail
+        }
+        requests[request.record.id] = nil
+        isRequestInFlight = requests.values.contains { $0.token == generation }
+        save(request)
+        if notify { sendNotification(request) }
+    }
+
+    private func showState(_ record: RequestRecord) {
+        switch record.outcome {
+        case .timeout: state = .timeout
+        case .failure: state = .failure
+        case .pending, .success, .cancelled: state = .monitoring
+        }
+        latestDetail = record.detail
+    }
+
+    private func sendNotification(_ request: ActiveRequest) {
+        guard generation == request.token else { return }
+        let id = UUID()
+        let notificationRecord = request.record
+        activeTasks[id] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.activeTasks[id] = nil }
+            guard self.generation == request.token, !Task.isCancelled else { return }
+            let delivery = await self.notifier.send(for: notificationRecord)
+            // 与最终响应共享同一条记录，防止较晚的通知结果覆盖完整耗时。
+            request.record.notification = delivery
+            self.save(request)
+        }
     }
 
     public func stop() {
         generation = nil
         task?.cancel()
         task = nil
+        pendingAnomalies = 0
+        latestJudgedID = nil
+        for task in activeTasks.values { task.cancel() }
         isRequestInFlight = false
         state = .stopped
         latestDetail = "监控已停止，历史记录已保留。"
@@ -151,16 +242,19 @@ public final class MonitorController: ObservableObject {
         reloadHistory()
     }
 
-    private func persist(_ record: RequestRecord) {
+    private func save(_ request: ActiveRequest) {
         do {
-            try store.append(record)
+            try store.update(request.record, sequence: request.sequence)
             reloadHistory()
-        } catch {
-            // Retain the failed record visibly and stop, rather than silently lose future history.
-            stop()
-            records.insert(record, at: 0)
-            storageError = "\(error.localizedDescription) 已停止监控，本次记录尚未保存。"
-        }
+        } catch { storageFailed(error, record: request.record) }
+    }
+
+    private func storageFailed(_ error: Error, record: RequestRecord) {
+        stop()
+        if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
+        else { records.insert(record, at: 0) }
+        writeFailure = "\(error.localizedDescription) 已停止监控，本次记录尚未保存。"
+        storageError = writeFailure
     }
 
     private func reloadHistory() {
@@ -168,7 +262,24 @@ public final class MonitorController: ObservableObject {
             totalRecords = try store.count()
             pageIndex = min(pageIndex, pageCount - 1)
             records = try store.page(limit: pageSize, offset: pageIndex * pageSize)
-            storageError = nil
+            storageError = writeFailure
         } catch { storageError = error.localizedDescription }
+    }
+}
+
+// 由控制器的主 actor 管理；网络完成、阈值和通知回调共同更新同一条记录。
+private final class ActiveRequest {
+    var record: RequestRecord
+    let sequence: Int64
+    let settings: MonitorSettings
+    let token: UUID
+    var wasJudged = false
+    var countDetail = ""
+
+    init(record: RequestRecord, sequence: Int64, settings: MonitorSettings, token: UUID) {
+        self.record = record
+        self.sequence = sequence
+        self.settings = settings
+        self.token = token
     }
 }

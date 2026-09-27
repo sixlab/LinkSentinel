@@ -66,9 +66,10 @@ public enum MonitorState: String, Sendable {
 
 public enum ProbeOutcome: String, Codable, Sendable {
     // 保留 timeout 的存储值，以兼容已经保存的请求历史。
-    case success, timeout, failure, cancelled
+    case pending, success, timeout, failure, cancelled
     public var label: String {
         switch self {
+        case .pending: return "请求中"
         case .success: return "正常"
         case .timeout: return "延迟高"
         case .failure: return "请求失败"
@@ -104,17 +105,29 @@ public struct ProbeResult: Sendable {
     }
 }
 
+public enum RequestPhase: String, Codable, Sendable {
+    case running, finished, interrupted
+}
+
 public struct RequestRecord: Identifiable, Codable, Sendable {
     public let id: UUID
     public let startedAt: Date
     public let url: String
-    public let elapsedMilliseconds: Double
-    public let outcome: ProbeOutcome
-    public let statusCode: Int?
-    public let detail: String
+    public var elapsedMilliseconds: Double
+    public var outcome: ProbeOutcome
+    public var statusCode: Int?
+    public var detail: String
     public var notification: NotificationDelivery
+    // 旧记录没有 phase，按已完成处理。
+    public var phase: RequestPhase?
+    public var isInFlight: Bool { phase == .running }
+    public var elapsedDescription: String {
+        if outcome == .pending { return "请求中…" }
+        let prefix = phase == .running || phase == .interrupted ? "≥ " : ""
+        return "\(prefix)\(elapsedMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms"
+    }
 
-    public init(id: UUID = UUID(), startedAt: Date, url: String, elapsedMilliseconds: Double, outcome: ProbeOutcome, statusCode: Int?, detail: String, notification: NotificationDelivery) {
+    public init(id: UUID = UUID(), startedAt: Date, url: String, elapsedMilliseconds: Double, outcome: ProbeOutcome, statusCode: Int?, detail: String, notification: NotificationDelivery, phase: RequestPhase? = nil) {
         self.id = id
         self.startedAt = startedAt
         self.url = url
@@ -123,5 +136,6 @@ public struct RequestRecord: Identifiable, Codable, Sendable {
         self.statusCode = statusCode
         self.detail = detail
         self.notification = notification
+        self.phase = phase
     }
 }

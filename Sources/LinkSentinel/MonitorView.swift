@@ -64,7 +64,7 @@ struct MonitorView: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .accessibilityIdentifier("toggleMonitoring")
                 }
-                Text("使用 HEAD 测量延迟；延迟高或失败每连续达到设定次数通知一次，正常响应后清零。")
+                Text("按间隔发起 HEAD 请求；达到阈值立即判定延迟高，每累计设定次数异常通知一次，正常响应清零。")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Image(systemName: notifications.needsSettings ? "bell.slash" : "bell")
@@ -163,7 +163,7 @@ struct MonitorView: View {
                 Text(record.url).lineLimit(1).truncationMode(.middle).help(record.url)
             }.width(min: 170, ideal: 280)
             TableColumn("响应耗时") { record in
-                Text("\(record.elapsedMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms")
+                Text(record.elapsedDescription)
                     .monospacedDigit()
             }.width(82)
             TableColumn("结果") { record in
@@ -204,7 +204,7 @@ struct MonitorView: View {
             [
                 dateFormatter.string(from: record.startedAt),
                 record.url,
-                "\(record.elapsedMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms",
+                record.elapsedDescription,
                 record.outcome.label,
                 record.notification.label
             ].joined(separator: "\t")
